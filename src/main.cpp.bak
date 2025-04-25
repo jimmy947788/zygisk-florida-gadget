@@ -1,0 +1,33 @@
+#include "log.h"
+#include "zygisk.hpp"
+
+
+class zygisk-florida-gadget : public zygisk::ModuleBase {
+public:
+    void onLoad(zygisk::Api *api, JNIEnv *env) override {
+        LOGI("Zygisk loaded");
+    }
+
+    void preAppSpecialize(zygisk::AppSpecializeArgs *args) override {
+        // JNIEnv *env = nullptr;
+        // api_->getJavaEnv(&env);  // 假設你在 onLoad 存下 api_ 物件
+        // const char *name = env->GetStringUTFChars(args->nice_name, nullptr);
+        // LOGI("App spawning: %s", name);
+        // env->ReleaseStringUTFChars(args->nice_name, name);
+        LOGI("App spawning: %s", args->nice_name);
+    }
+
+    void postAppSpecialize(const zygisk::AppSpecializeArgs *args) override {
+        LOGI("App %s specialized", args->nice_name);
+    }
+
+    void preServerSpecialize(zygisk::ServerSpecializeArgs *args) override {
+        LOGI("System server spawning");
+    }
+
+    void postServerSpecialize(const zygisk::ServerSpecializeArgs *args) override {
+        LOGI("System server specialized");
+    }
+};
+
+REGISTER_ZYGISK_MODULE(zygisk-florida-gadget)
