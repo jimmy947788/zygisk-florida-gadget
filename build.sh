@@ -22,7 +22,7 @@ MODULE_VERSION_CODE=114
 # 若為 install 模式，直接 adb push zip
 if [[ "$1" == "install" ]]; then
     echo "[*] Pushing $MODULE_NAME.zip to /sdcard/Download/ via ADB..."
-    adb push $MODULE_NAME.zip /sdcard/Download/
+    adb push build/$MODULE_NAME.zip /sdcard/Download/
     echo "[+] Push complete."
     exit 0
 fi
