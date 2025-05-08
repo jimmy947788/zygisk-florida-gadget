@@ -10,20 +10,27 @@ ABI=arm64-v8a
 
 # gadget / apk 來源路徑（放在專案根目錄）
 GADGET_DIR=gadget
+GADGET_SRC=ajeossida-gadget-16.5.7-android-arm64-temp.so
 GADGET_SO=libgadget.so
 GADGET_CONFIG_SO=libgadget.config.so
 APK_FILE=xgj.apk
 SERVICE_SCRIPT=service.sh
 
 # 模組版本
-MODULE_VERSION=16.7.13
-MODULE_VERSION_CODE=114
+MODULE_VERSION=16.5.7
+MODULE_VERSION_CODE=005
 
 # 若為 install 模式，直接 adb push zip
 if [[ "$1" == "install" ]]; then
     echo "[*] Pushing $MODULE_NAME.zip to /sdcard/Download/ via ADB..."
     adb push build/$MODULE_NAME.zip /sdcard/Download/
     echo "[+] Push complete."
+    exit 0
+fi
+
+if [[ "$1" == "clean" ]]; then
+    echo "[*] Cleaning previous builds..."
+    rm -rf $OUT_DIR build/ #module.prop $MODULE_NAME.zip
     exit 0
 fi
 
@@ -63,7 +70,7 @@ cp $OUT_DIR/libs/$ABI/$SO_NAME build/zygisk/$ABI.so
 cat > build/module.prop <<EOF
 id=$MODULE_NAME
 name=Zygisk Florida Gadget
-version=$MODULE_VERSION
+version=$MODULE_VERSION.$MODULE_VERSION_CODE
 versionCode=$MODULE_VERSION_CODE
 author=Jimmy
 description=A zygisk hook module with direct-root gadget.
@@ -71,7 +78,7 @@ EOF
 
 
 # 複製 gadget.so、config.so、apk、sh
-cp $GADGET_DIR/*.so     build/$GADGET_SO
+cp $GADGET_DIR/$GADGET_SRC     build/$GADGET_SO
 cp $GADGET_DIR/*.config build/$GADGET_CONFIG_SO
 cp $APK_FILE            build/
 cp $SERVICE_SCRIPT      build/
