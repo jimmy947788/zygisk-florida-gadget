@@ -7,7 +7,9 @@ LOCAL_MODULE := zygisk-florida-gadget
 # 你的主要程式碼
 LOCAL_SRC_FILES := \
     $(LOCAL_PATH)/src/main.cpp \
-    $(LOCAL_PATH)/src/gadget.cpp
+    $(LOCAL_PATH)/src/gadget.cpp \
+    $(LOCAL_PATH)/src/remapper.cpp
+
 
 # 加上 xdl 的所有 .c 檔
 LOCAL_SRC_FILES += $(wildcard $(LOCAL_PATH)/src/xdl/*.c)

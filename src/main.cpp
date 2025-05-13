@@ -18,6 +18,7 @@
 #include "zygisk.hpp"
 #include "nlohmann/json.hpp"
 #include "xdl.h"
+#include "remapper.h"
 
 #define BUFFER_SIZE 1024
 

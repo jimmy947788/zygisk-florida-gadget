@@ -18,7 +18,7 @@ SERVICE_SCRIPT=service.sh
 
 # 模組版本
 MODULE_VERSION=16.7.14
-MODULE_VERSION_CODE=130
+MODULE_VERSION_CODE=100
 
 # 若為 install 模式，直接 adb push zip
 if [[ "$1" == "install" ]]; then
