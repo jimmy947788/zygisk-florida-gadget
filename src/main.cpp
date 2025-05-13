@@ -11,11 +11,13 @@
 #include <sys/stat.h>
 #include <dlfcn.h>
 #include <sys/select.h>  // 在最上面 include
+#include <signal.h>
+#include <ucontext.h>
 
 #include "log.h"
 #include "zygisk.hpp"
 #include "nlohmann/json.hpp"
-//#include "xdl.h"
+#include "xdl.h"
 
 #define BUFFER_SIZE 1024
 
@@ -27,6 +29,21 @@ using json = nlohmann::json;
 void sleep_for(int milliseconds) {
     std::this_thread::sleep_for(std::chrono::milliseconds(milliseconds));
 }
+
+static void sigbus_handler(int sig, siginfo_t* si, void* arg) {
+    ucontext_t* uc = (ucontext_t*)arg;
+    void* fault_pc = (void*)uc->uc_mcontext.pc;
+    LOGE("!!! SIGBUS at PC=%p, addr=%p", fault_pc, si->si_addr);
+    _exit(1);
+}
+
+void install_sigbus_handler() {
+    struct sigaction sa{};
+    sa.sa_sigaction = sigbus_handler;
+    sa.sa_flags = SA_SIGINFO;
+    sigaction(SIGBUS, &sa, nullptr);
+}
+
 
 
 void writeString(int fd, const std::string& str) {
@@ -47,13 +64,13 @@ std::string readString(int fd) {
     timeout.tv_usec = 0;
     int ret = select(fd + 1, &fds, NULL, NULL, &timeout);
     if (ret <= 0) {
-        LOGD("readString timeout or error");
+        LOGE("readString timeout or error");
         return "";
     }
 
     read(fd, &length, sizeof(length));
     if (length == 0 || length > 4096) {
-        LOGD("readString invalid length");
+        LOGE("readString invalid length");
         return "";
     }
 
@@ -64,7 +81,7 @@ std::string readString(int fd) {
 
 
 void injection_thread(const char* target_package_name, const std::string& installation_dir, const std::string& frida_gadget_name, const std::string& frida_config_name, int time_to_sleep) {
-    LOGD("Frida-gadget injection thread start for %s, gadget name: %s, usleep: %d", target_package_name, frida_gadget_name.c_str(), time_to_sleep);
+    LOGI("Frida-gadget injection thread start for %s, gadget name: %s, usleep: %d", target_package_name, frida_gadget_name.c_str(), time_to_sleep);
     if (time_to_sleep){
         sleep_for(time_to_sleep);
     }
@@ -75,30 +92,43 @@ void injection_thread(const char* target_package_name, const std::string& instal
 
     std::ifstream gadget_file(gadget_path);
     if (gadget_file) {
-        LOGD("Gadget is ready to load from %s", gadget_path.c_str());
+        LOGI("Gadget is ready to load from %s", gadget_path.c_str());
     } else {
-        LOGD("Cannot find gadget in %s", gadget_path.c_str());
+        LOGE("Cannot find gadget in %s", gadget_path.c_str());
+        return;
+    }
+  
+    auto *handle = xdl_open(gadget_path.c_str(), XDL_TRY_FORCE_LOAD);
+    if (handle) {
+        LOGI("Injected %s with handle %p", gadget_path.c_str(), handle);
+        remap_lib(gadget_path);
+        return;
+    }
+    auto xdl_err = dlerror();
+    LOGE("Failed to inject %s (xdl_open): %s", gadget_path.c_str(), xdl_err);
+
+    handle = dlopen(gadget_path.c_str(), RTLD_NOW);
+    if (handle) {
+        LOGI("Injected %s with handle %p (dlopen)", gadget_path.c_str(), handle);
+        remap_lib(gadget_path);
         return;
     }
 
-    void* handle = dlopen(gadget_path.c_str(), 1);
-    if (handle) {
-        LOGD("Frida-gadget loaded");
-    } else {
-        LOGD("Frida-gadget failed to load");
-    }
+    auto dl_err = dlerror();
+    LOGE("Failed to inject %s (dlopen): %s", gadget_path.c_str(), dl_err);
+
 
     // 如果有权限，可以尝试删除文件，似乎没有权限
     if (unlink(gadget_path.c_str()) == 0) {
-        LOGD("Deleted gadget file: %s", gadget_path.c_str());
+        LOGI("Deleted gadget file: %s", gadget_path.c_str());
     } else {
-        LOGD("Failed to delete gadget file: %s", gadget_path.c_str());
+        LOGE("Failed to delete gadget file: %s", gadget_path.c_str());
     }
 
     if (unlink(config_path.c_str()) == 0) {
-        LOGD("Deleted config file: %s", config_path.c_str());
+        LOGI("Deleted config file: %s", config_path.c_str());
     } else {
-        LOGD("Failed to delete config file: %s", config_path.c_str());
+        LOGE("Failed to delete config file: %s", config_path.c_str());
     }
 }
 
@@ -123,20 +153,20 @@ void copy_file(const std::string& source_path, const std::string& dest_path) {
 
     source_file = fopen(source_path.c_str(), "rb");
     if (source_file == nullptr) {
-        LOGD("Error opening source file: %s", source_path.c_str());
+        LOGE("Error opening source file: %s", source_path.c_str());
         exit(EXIT_FAILURE);
     }
 
     dest_file = fopen(dest_path.c_str(), "wb");
     if (dest_file == nullptr) {
-        LOGD("Error opening destination file: %s", dest_path.c_str());
+        LOGE("Error opening destination file: %s", dest_path.c_str());
         fclose(source_file);
         exit(EXIT_FAILURE);
     }
 
     while ((bytes_read = fread(buffer, 1, BUFFER_SIZE, source_file)) > 0) {
         if (fwrite(buffer, 1, bytes_read, dest_file) != bytes_read) {
-            LOGD("Error writing to destination file");
+            LOGE("Error writing to destination file");
             fclose(source_file);
             fclose(dest_file);
             exit(EXIT_FAILURE);
@@ -144,7 +174,7 @@ void copy_file(const std::string& source_path, const std::string& dest_path) {
     }
 
     if (ferror(source_file)) {
-        LOGD("Error reading from source file");
+        LOGE("Error reading from source file");
     }
 
     fclose(source_file);
@@ -155,7 +185,7 @@ std::string find_installation_dir(const std::string& package_name) {
     const char* data_app_path = "/data/app/";
     DIR* dir = opendir(data_app_path);
     if (!dir) {
-        LOGD("Failed to open /data/app");
+        LOGE("Failed to open /data/app");
         return "";
     }
     std::regex pattern(package_name);
@@ -174,14 +204,14 @@ std::string find_installation_dir(const std::string& package_name) {
         // 判断是否为目录或文件
         if (entry->d_type == DT_DIR) {
             if (std::regex_search(fullPath, pattern)) {
-                LOGD("Success find install package");
+                LOGI("Success find install package");
                 pName = fullPath;
                 break;
             }else{
                 std::string nextPath =  fullPath + "/";
                 DIR* dir2 = opendir(nextPath.c_str());
                 if (!dir2) {
-                    LOGD("Failed to open next Path");
+                    LOGE("Failed to open next Path");
                     continue;
                 }
                 // 打开目录
@@ -196,7 +226,7 @@ std::string find_installation_dir(const std::string& package_name) {
                     if (std::regex_search(fullPath2, pattern)) {
                         // 打印文件或目录的完整路径
                         pName = nextPath + name2;
-                        LOGD("Success find install package %s",pName.c_str());
+                        LOGI("Success find install package %s",pName.c_str());
                         break;
                     }
                 }
@@ -235,7 +265,7 @@ public:
         if (result["code"] != 0){
             return;
         }
-        LOGD("config success %s", package_name);
+        LOGI("config success %s", package_name);
         _load = true;
         frida_gadget_name = result["frida_gadget_name"];
         frida_config_name = result["frida_config_name"];
@@ -285,7 +315,7 @@ static void companion_handler(int i) {
     std::ifstream configFile(config_file_path);
     if (!configFile) {
         result["code"] = 1;
-        LOGD("The configuration file does not exist");
+        LOGE("The configuration file does not exist");
         writeString(i, result.dump());
         return;
     }
@@ -301,7 +331,7 @@ static void companion_handler(int i) {
 
     // 查找安装目录
     std::string installation_dir = find_installation_dir(package_name);
-    LOGD("find_installation_dir(%s) is %s", package_name.c_str(), installation_dir.c_str());
+    LOGI("find_installation_dir(%s) is %s", package_name.c_str(), installation_dir.c_str());
     if (installation_dir.empty()) {
         result["code"] = 3;
         LOGD("Failed to find installation directory for package: %s", package_name.c_str());
@@ -317,7 +347,7 @@ static void companion_handler(int i) {
         bool inject = package_config["inject"];
         if (!inject) {
             result["code"] = 4;
-            LOGD("inject is not true %s", package_name.c_str());
+            LOGE("inject is not true %s", package_name.c_str());
             writeString(i, result.dump());
             return;
         }
@@ -336,33 +366,39 @@ static void companion_handler(int i) {
     if (stat(lib_arm64_dir.c_str(), &st) == -1) {
         if (mkdir(lib_arm64_dir.c_str(), 0755) != 0) {
             result["code"] = 4;
-            LOGD("Failed to create directory: %s", lib_arm64_dir.c_str());
+            LOGE("Failed to create directory: %s", lib_arm64_dir.c_str());
             writeString(i, result.dump());
             return;
         }
     }
 
-    LOGD("Copying config file");
+    LOGI("Copying config file");
     std::string copy_config_dst = lib_arm64_dir + frida_config_name;
 
     if (package_config.contains("config")) {
+        LOGD("copy config from %s to %s", package_config["config"].get<std::string>().c_str(),
+             copy_config_dst.c_str());
         copy_file(package_config["config"], copy_config_dst);
     } else {
         std::string copy_config_src = module_dir + "/libgadget.config.so";
+        LOGD("copy config from %s to %s", copy_config_src.c_str(), copy_config_dst.c_str());
         copy_file(copy_config_src, copy_config_dst);
     }
-    LOGD("Successfully copied config");
+    LOGI("Successfully copied config");
 
-    LOGD("Copying gadget");
+    LOGI("Copying gadget");
     std::string copy_gadget_dst = lib_arm64_dir + frida_gadget_name;
 
     if (package_config.contains("gadget")) {
+        LOGD("copy gadget from %s to %s", package_config["gadget"].get<std::string>().c_str(),
+             copy_gadget_dst.c_str());
         copy_file(package_config["gadget"], copy_gadget_dst);
     } else {
         std::string copy_gadget_src = module_dir + "/libgadget.so";
+        LOGD("copy gadget from %s to %s", copy_gadget_src.c_str(), copy_gadget_dst.c_str());
         copy_file(copy_gadget_src, copy_gadget_dst);
     }
-    LOGD("Successfully copied gadget");
+    LOGI("Successfully copied gadget");
 
     result["frida_gadget_name"] = frida_gadget_name;
     result["frida_config_name"] = frida_config_name;

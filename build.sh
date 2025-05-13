@@ -10,15 +10,15 @@ ABI=arm64-v8a
 
 # gadget / apk 來源路徑（放在專案根目錄）
 GADGET_DIR=gadget
-GADGET_SRC=ajeossida-gadget-16.5.7-android-arm64-temp.so
+GADGET_SRC=ajeossida-gadget-16.7.14-android-arm64.so
 GADGET_SO=libgadget.so
 GADGET_CONFIG_SO=libgadget.config.so
 APK_FILE=xgj.apk
 SERVICE_SCRIPT=service.sh
 
 # 模組版本
-MODULE_VERSION=16.5.7
-MODULE_VERSION_CODE=005
+MODULE_VERSION=16.7.14
+MODULE_VERSION_CODE=130
 
 # 若為 install 模式，直接 adb push zip
 if [[ "$1" == "install" ]]; then
@@ -46,13 +46,17 @@ if [ ! -f "$NDK_BUILD" ]; then
     exit 1
 fi
 
+# sudo apt-get install ccache
+export NDK_CCACHE=$(which ccache)
+echo "[*] NDK_CCACHE: $NDK_CCACHE"
+
 # 清除與編譯
 echo "[*] Cleaning previous builds..."
 rm -rf $OUT_DIR zygisk module.prop $MODULE_NAME.zip
 mkdir -p $OUT_DIR/libs/$ABI
 
 echo "[*] Building .so..."
-$NDK_BUILD \
+$NDK_BUILD -j$(nproc) \
     NDK_PROJECT_PATH=. \
     APP_BUILD_SCRIPT=Android.mk \
     NDK_APPLICATION_MK=Application.mk \
@@ -97,7 +101,7 @@ zip -r $MODULE_NAME.zip \
     $SERVICE_SCRIPT > /dev/null || true
 
 echo "[+] Build and packaging complete: $MODULE_NAME.zip"
-
+echo "[*] libgadget.so md5sum: $(md5sum $GADGET_SO | awk '{print $1}')"
 # 顯示內容列表
 echo "[*] ZIP 包內容："
 unzip -l $MODULE_NAME.zip
